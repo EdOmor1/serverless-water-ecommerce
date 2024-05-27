@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: >
+  Serverless Water E-commerce Application
+
+Resources:
+  # Lambda Functions
+  AuthenticationFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Handler: src/lambda-functions/authentication/app.handler
+      Runtime: python3.9
+      CodeUri: .
+      MemorySize: 128
+      Timeout: 10
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Environment:
+        Variables:
+          DB_HOST: !Ref RDSInstanceEndpoint
+          DB_USER: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_NAME: !Ref DBName
+
+  ProductManagementFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Handler: src/lambda-functions/product-management/app.handler
+      Runtime: python3.9
+      CodeUri: .
+      MemorySize: 128
+      Timeout: 10
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Environment:
+        Variables:
+          DB_HOST: !Ref RDSInstanceEndpoint
+          DB_USER: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_NAME: !Ref DBName
+
+  OrderProcessingFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      Handler: src/lambda-functions/order-processing/app.handler
+      Runtime: python3.9
+      CodeUri: .
+      MemorySize: 128
+      Timeout: 10
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Environment:
+        Variables:
+          DB_HOST: !Ref RDSInstanceEndpoint
+          DB_USER: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_NAME: !Ref DBName
+
+  # API Gateway
+  ApiGateway:
+    Type: 'AWS::Serverless::Api'
+    Properties:
+      StageName: Prod
+      DefinitionBody:
+        swagger: "2.0"
+        info:
+          title: "Water E-commerce API"
+          version: "1.0"
+        paths:
+          /authenticate:
+            post:
+              x-amazon-apigateway-integration:
+                uri:
+                  Fn::Sub:
+                    - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthenticationFunction.Arn}/invocations
+                    - AuthenticationFunction: !Ref AuthenticationFunction
+                httpMethod: POST
+                type: aws_proxy
+          /products:
+            get:
+              x-amazon-apigateway-integration:
+                uri:
+                  Fn::Sub:
+                    - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProductManagementFunction.Arn}/invocations
+                    - ProductManagementFunction: !Ref ProductManagementFunction
+                httpMethod: GET
+                type: aws_proxy
+          /orders:
+            post:
+              x-amazon-apigateway-integration:
+                uri:
+                  Fn::Sub:
+                    - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OrderProcessingFunction.Arn}/invocations
+                    - OrderProcessingFunction: !Ref OrderProcessingFunction
+                httpMethod: POST
+                type: aws_proxy
+
+  # RDS Instance
+  RDSInstance:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      DBInstanceClass: db.t2.micro
+      Engine: mysql
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBName: !Ref DBName
+      AllocatedStorage: 20
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+      DBSubnetGroupName: !Ref DBSubnetGroup
+
+  # RDS Subnet Group
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: "Subnet group for RDS instance"
+      SubnetIds:
+        - !Ref Subnet1
+        - !Ref Subnet2
+
+  # Security Group for RDS
+  RDSSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: "Security group for RDS instance"
+      VpcId: !Ref VPC
+
+  # VPC
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: 10.0.0.0/16
+
+  # Subnets
+  Subnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs]
+
+  Subnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs]
+
+Parameters:
+  DBUsername:
+    Type: String
+    Description: The database admin account username
+
+  DBPassword:
+    Type: String
+    Description: The database admin account password
+
+  DBName:
+    Type: String
+    Description: The database name
+
+Outputs:
+  ApiUrl:
+    Description: "URL for the API Gateway"
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  RDSInstanceEndpoint:
+    Description: "Endpoint for the RDS instance"
+    Value: !GetAtt RDSInstance.Endpoint.Address
